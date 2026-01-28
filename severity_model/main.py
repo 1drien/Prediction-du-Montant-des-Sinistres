@@ -6,6 +6,7 @@ from sklearn.metrics import mean_absolute_error
 import matplotlib
 matplotlib.use('Agg')   # Backend for non-GUI environments (saves files instead of showing them)
 import matplotlib.pyplot as plt
+import xgboost as xgb
 
 df = pd.read_csv('train.csv')
 print(df.head())
@@ -105,4 +106,5 @@ print(f"error after log transformation: {erreur_log}")
 rmse_log = np.sqrt(np.mean((y_test_original - true_prediction)**2))
 print(f"RMSE after log transformation :  {rmse_log}")
 
+# nous allons maintenant faire un xgboost pour voir si cela améliore les performances du modèle
 
