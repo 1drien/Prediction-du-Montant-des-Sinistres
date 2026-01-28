@@ -7,6 +7,8 @@ import matplotlib
 matplotlib.use('Agg')   # Backend for non-GUI environments (saves files instead of showing them)
 import matplotlib.pyplot as plt
 import xgboost as xgb
+from xgboost import XGBRegressor
+
 
 df = pd.read_csv('train.csv')
 print(df.head())
@@ -73,7 +75,7 @@ rmse = np.sqrt(np.mean((predictions - y_test)**2))
 print(f"RMSE between Linear Regression and Baseline: {rmse}")
 
 print(f"Erreur du modèle 'Naïf' (Moyenne partout) : {mae_baseline:.2f} €")
-print(f"Erreur de TON modèle (LinearRegression) : {erreur:.2f} €")
+print(f"Erreur du modèle (LinearRegression) : {erreur:.2f} €")
 
 # Visualisation des valeurs 
 plt.hist(df['montant_sinistre'], bins=50, alpha=0.7, label='Montant Sinistre')
@@ -107,4 +109,28 @@ rmse_log = np.sqrt(np.mean((y_test_original - true_prediction)**2))
 print(f"RMSE after log transformation :  {rmse_log}")
 
 # nous allons maintenant faire un xgboost pour voir si cela améliore les performances du modèle
+X = df_log.drop(columns=["montant_sinistre"])
+y = df_log["montant_sinistre"]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+params = {
+    'objective': 'reg:squarederror',
+    'learning_rate': 0.1,
+    'max_depth': 4,
+    'alpha': 1,
+    'n_estimators': 90
+}
+xgb_reg = XGBRegressor(**params)
+xgb_reg.fit(X_train, y_train)
+#prediction sur le test set 
+y_pred_log = xgb_reg.predict(X_test)
+#on converti nos valeurs en euros 
+y_pred_euros = np.exp(y_pred_log) -1
+y_test_euros = np.exp(y_test) - 1
+mae_xgb = mean_absolute_error(y_pred_euros, y_test_euros)
+print(f"XGBoost MAE on training set: {mae_xgb}")
+rmse_xgb_train = np.sqrt(np.mean((y_pred_euros - y_test_euros)**2))
+print(f"xgboost rmse on training set : {rmse_xgb_train}")
+
 
