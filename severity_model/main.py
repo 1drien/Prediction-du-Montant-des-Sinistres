@@ -143,5 +143,9 @@ plt.barh(sorted_features[:10], feature_importance[sorted_idx][:10])
 plt.xlabel("Importance")
 plt.ylabel("Feature")
 plt.title("Top 10 Most Important Features")
+plt.savefig("feature_importance.png")
+print("Saved feature importance plot to 'feature_importance.png'")
 plt.gca().invert_yaxis()
 plt.show()
+
+# TODO : optimiser le xgboost avec une recherche d'hyperparamètres
