@@ -133,4 +133,15 @@ print(f"XGBoost MAE on training set: {mae_xgb}")
 rmse_xgb_train = np.sqrt(np.mean((y_pred_euros - y_test_euros)**2))
 print(f"xgboost rmse on training set : {rmse_xgb_train}")
 
+# imortance des variables 
+feature_importance = xgb_reg.feature_importances_
+sorted_idx = np.argsort(feature_importance)[::-1]
+sorted_features = X.columns[sorted_idx]
 
+plt.figure(figsize=(10, 6))
+plt.barh(sorted_features[:10], feature_importance[sorted_idx][:10])
+plt.xlabel("Importance")
+plt.ylabel("Feature")
+plt.title("Top 10 Most Important Features")
+plt.gca().invert_yaxis()
+plt.show()
