@@ -114,78 +114,137 @@ X = df_log.drop(columns=["montant_sinistre"])
 y = df_log["montant_sinistre"]
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-def objective(trial):
-    param = {
-        "verbosity": 0,
-        "objective": "reg:squarederror",
-        # use exact for small dataset.
-        "tree_method": "exact",
-        # defines booster, gblinear for linear functions.
-        "booster": trial.suggest_categorical("booster", ["gbtree", "gblinear", "dart"]),
-        # L2 regularization weight.
-        "lambda": trial.suggest_float("lambda", 1e-8, 1.0, log=True),
-        # L1 regularization weight.
-        "alpha": trial.suggest_float("alpha", 1e-8, 1.0, log=True),
-        # sampling ratio for training data.
-        "subsample": trial.suggest_float("subsample", 0.2, 1.0),
-        # sampling according to each tree.
-        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.2, 1.0),
-    }
 
-    if param["booster"] in ["gbtree", "dart"]:
-        # maximum depth of the tree, signifies complexity of the tree.
-        param["max_depth"] = trial.suggest_int("max_depth", 3, 9, step=2)
-        # minimum child weight, larger the term more conservative the tree.
-        param["min_child_weight"] = trial.suggest_int("min_child_weight", 2, 10)
-        param["eta"] = trial.suggest_float("eta", 1e-8, 1.0, log=True)
-        # defines how selective algorithm is.
-        param["gamma"] = trial.suggest_float("gamma", 1e-8, 1.0, log=True)
-        param["grow_policy"] = trial.suggest_categorical("grow_policy", ["depthwise", "lossguide"])
+#optimisation of hyperparameters with optuna
+final_params = {
+    'objective': 'reg:squarederror',
+    'verbosity': 0,
+    'booster': 'gblinear',
+    'lambda': 1.049e-05,
+    'alpha': 0.000823,
+    'subsample': 0.897,
+    'colsample_bytree': 0.204
+}
 
-    if param["booster"] == "dart":
-        param["sample_type"] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
-        param["normalize_type"] = trial.suggest_categorical("normalize_type", ["tree", "forest"])
-        param["rate_drop"] = trial.suggest_float("rate_drop", 1e-8, 1.0, log=True)
-        param["skip_drop"] = trial.suggest_float("skip_drop", 1e-8, 1.0, log=True)
-    xgb_reg = XGBRegressor(**param)
-    xgb_reg.fit(X_train, y_train)
-#prediction sur le test set 
-    y_pred_log = xgb_reg.predict(X_test)
-#on converti nos valeurs en euros 
-    y_pred_euros = np.exp(y_pred_log) -1
-    y_test_euros = np.exp(y_test) - 1
-    mae_xgb = mean_absolute_error(y_pred_euros, y_test_euros)
-    print(f"XGBoost MAE on training set: {mae_xgb}")
-    rmse_xgb_train = np.sqrt(np.mean((y_pred_euros - y_test_euros)**2))
-    print(f"xgboost rmse on training set : {rmse_xgb_train}")
+# 2. On crée et entraîne le modèle unique avec ces paramètres
+final_model = XGBRegressor(**final_params)
+final_model.fit(X_train, y_train)
 
+# 3. Prédictions finales sur le Test Set
+y_pred_log = final_model.predict(X_test)
 
-if __name__ == "__main__":
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=100, timeout=600)
+# 4. Conversion inverse (Log -> Euros)
+y_pred_euros = np.exp(y_pred_log) - 1
+y_test_euros = np.exp(y_test) - 1
 
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial:")
-    trial = study.best_trial
+# 5. Calcul des scores finaux
+mae_final = mean_absolute_error(y_test_euros, y_pred_euros)
+rmse_final = np.sqrt(np.mean((y_test_euros - y_pred_euros)**2))
 
-    print("  Value: {}".format(trial.value))
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print("    {}: {}".format(key, value))
-        
-# imortance des variables 
-feature_importance = xgb_reg.feature_importances_
-sorted_idx = np.argsort(feature_importance)[::-1]
-sorted_features = X.columns[sorted_idx]
+print("------------------------------------------------")
+print(f" MAE Finale : {mae_final:.2f} €")
+print(f" RMSE Final : {rmse_final:.2f} €")
+print("------------------------------------------------")
+
+# --- IMPORTANCE DES FEATURES ---
+# Note : Avec 'gblinear', l'importance correspond aux 'poids' (coefficients) de la régression.
+
+# On récupère les poids
+weights = pd.Series(final_model.coef_, index=X_train.columns)
+
+# On prend les 10 plus impactants (en valeur absolue, car un poids négatif est aussi important)
+top_features = weights.abs().sort_values(ascending=False).head(10)
 
 plt.figure(figsize=(10, 6))
-plt.barh(sorted_features[:10], feature_importance[sorted_idx][:10])
-plt.xlabel("Importance")
-plt.ylabel("Feature")
-plt.title("Top 10 Most Important Features")
-plt.savefig("feature_importance.png")
-print("Saved feature importance plot to 'feature_importance.png'")
-plt.gca().invert_yaxis()
+top_features.plot(kind='barh', color='purple')
+plt.title("Top 10 des variables les plus importantes (Modèle gblinear)")
+plt.xlabel("Poids (Impact sur le prix)")
+plt.gca().invert_yaxis() # Pour avoir le plus gros en haut
+plt.savefig("feature_importance_final.png")
+print("Graphique sauvegardé sous 'feature_importance_final.png'")
 plt.show()
 
-# TODO : optimiser le xgboost avec une recherche d'hyperparamètres
+
+#ici le code utilisé avec optuna pour optimiser les hyperparamètres de xgboost
+# def objective(trial):
+#     param = {
+#         "verbosity": 0,
+#         "objective": "reg:squarederror",
+#         # use exact for small dataset.
+#         "tree_method": "exact",
+#         # defines booster, gblinear for linear functions.
+#         "booster": trial.suggest_categorical("booster", ["gbtree", "gblinear", "dart"]),
+#         # L2 regularization weight.
+#         "lambda": trial.suggest_float("lambda", 1e-8, 1.0, log=True),
+#         # L1 regularization weight.
+#         "alpha": trial.suggest_float("alpha", 1e-8, 1.0, log=True),
+#         # sampling ratio for training data.
+#         "subsample": trial.suggest_float("subsample", 0.2, 1.0),
+#         # sampling according to each tree.
+#         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.2, 1.0),
+#     }
+
+#     if param["booster"] in ["gbtree", "dart"]:
+#         # maximum depth of the tree, signifies complexity of the tree.
+#         param["max_depth"] = trial.suggest_int("max_depth", 3, 9, step=2)
+#         # minimum child weight, larger the term more conservative the tree.
+#         param["min_child_weight"] = trial.suggest_int("min_child_weight", 2, 10)
+#         param["eta"] = trial.suggest_float("eta", 1e-8, 1.0, log=True)
+#         # defines how selective algorithm is.
+#         param["gamma"] = trial.suggest_float("gamma", 1e-8, 1.0, log=True)
+#         param["grow_policy"] = trial.suggest_categorical("grow_policy", ["depthwise", "lossguide"])
+
+#     if param["booster"] == "dart":
+#         param["sample_type"] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
+#         param["normalize_type"] = trial.suggest_categorical("normalize_type", ["tree", "forest"])
+#         param["rate_drop"] = trial.suggest_float("rate_drop", 1e-8, 1.0, log=True)
+#         param["skip_drop"] = trial.suggest_float("skip_drop", 1e-8, 1.0, log=True)
+#     xgb_reg = XGBRegressor(**param)
+#     xgb_reg.fit(X_train, y_train)
+# #prediction sur le test set 
+#     y_pred_log = xgb_reg.predict(X_test)
+# #on converti nos valeurs en euros 
+#     y_pred_euros = np.exp(y_pred_log) -1
+#     y_test_euros = np.exp(y_test) - 1
+#     mae_xgb = mean_absolute_error(y_pred_euros, y_test_euros)
+#     print(f"XGBoost MAE on training set: {mae_xgb}")
+#     rmse_xgb_train = np.sqrt(np.mean((y_pred_euros - y_test_euros)**2))
+#     return rmse_xgb_train
+
+
+# if __name__ == "__main__":
+#     study = optuna.create_study(direction="minimize")
+#     study.optimize(objective, n_trials=100, timeout=600)
+
+#     print("Number of finished trials: ", len(study.trials))
+#     print("Best trial:")
+#     trial = study.best_trial
+
+#     print("  Value: {}".format(trial.value))
+#     print("  Params: ")
+#     for key, value in trial.params.items():
+#         print("    {}: {}".format(key, value))
+
+# --- VERDICT SURAPPRENTISSAGE ---
+
+# 1. Prédiction sur le jeu d'ENTRAÎNEMENT (ce qu'il connait déjà)
+y_pred_train_log = final_model.predict(X_train)
+y_pred_train_euros = np.exp(y_pred_train_log) - 1
+y_train_euros = np.exp(y_train) - 1
+
+# 2. Calcul du RMSE Train
+rmse_train = np.sqrt(np.mean((y_train_euros - y_pred_train_euros)**2))
+
+print("\n--- VERDICT SURAPPRENTISSAGE ---")
+print(f"Erreur sur le Train (Mémoire) : {rmse_train:.2f} €")
+print(f"Erreur sur le Test (Réalité)  : {rmse_final:.2f} €")
+
+ecart = rmse_final - rmse_train
+print(f"Écart : {ecart:.2f} €")
+
+if ecart > 200: # Seuil arbitraire, dépend du métier
+    print("Risque de surapprentissage")
+elif ecart < 0:
+    print("Le modèle est meilleur sur l'inconnu")
+else:
+    print("Le modèle généralise bien ")
