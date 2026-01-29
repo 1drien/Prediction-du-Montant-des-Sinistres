@@ -8,6 +8,7 @@ matplotlib.use('Agg')   # Backend for non-GUI environments (saves files instead 
 import matplotlib.pyplot as plt
 import xgboost as xgb
 from xgboost import XGBRegressor
+import optuna
 
 
 df = pd.read_csv('train.csv')
@@ -113,26 +114,65 @@ X = df_log.drop(columns=["montant_sinistre"])
 y = df_log["montant_sinistre"]
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+def objective(trial):
+    param = {
+        "verbosity": 0,
+        "objective": "reg:squarederror",
+        # use exact for small dataset.
+        "tree_method": "exact",
+        # defines booster, gblinear for linear functions.
+        "booster": trial.suggest_categorical("booster", ["gbtree", "gblinear", "dart"]),
+        # L2 regularization weight.
+        "lambda": trial.suggest_float("lambda", 1e-8, 1.0, log=True),
+        # L1 regularization weight.
+        "alpha": trial.suggest_float("alpha", 1e-8, 1.0, log=True),
+        # sampling ratio for training data.
+        "subsample": trial.suggest_float("subsample", 0.2, 1.0),
+        # sampling according to each tree.
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.2, 1.0),
+    }
 
-params = {
-    'objective': 'reg:squarederror',
-    'learning_rate': 0.1,
-    'max_depth': 4,
-    'alpha': 1,
-    'n_estimators': 90
-}
-xgb_reg = XGBRegressor(**params)
-xgb_reg.fit(X_train, y_train)
+    if param["booster"] in ["gbtree", "dart"]:
+        # maximum depth of the tree, signifies complexity of the tree.
+        param["max_depth"] = trial.suggest_int("max_depth", 3, 9, step=2)
+        # minimum child weight, larger the term more conservative the tree.
+        param["min_child_weight"] = trial.suggest_int("min_child_weight", 2, 10)
+        param["eta"] = trial.suggest_float("eta", 1e-8, 1.0, log=True)
+        # defines how selective algorithm is.
+        param["gamma"] = trial.suggest_float("gamma", 1e-8, 1.0, log=True)
+        param["grow_policy"] = trial.suggest_categorical("grow_policy", ["depthwise", "lossguide"])
+
+    if param["booster"] == "dart":
+        param["sample_type"] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
+        param["normalize_type"] = trial.suggest_categorical("normalize_type", ["tree", "forest"])
+        param["rate_drop"] = trial.suggest_float("rate_drop", 1e-8, 1.0, log=True)
+        param["skip_drop"] = trial.suggest_float("skip_drop", 1e-8, 1.0, log=True)
+    xgb_reg = XGBRegressor(**param)
+    xgb_reg.fit(X_train, y_train)
 #prediction sur le test set 
-y_pred_log = xgb_reg.predict(X_test)
+    y_pred_log = xgb_reg.predict(X_test)
 #on converti nos valeurs en euros 
-y_pred_euros = np.exp(y_pred_log) -1
-y_test_euros = np.exp(y_test) - 1
-mae_xgb = mean_absolute_error(y_pred_euros, y_test_euros)
-print(f"XGBoost MAE on training set: {mae_xgb}")
-rmse_xgb_train = np.sqrt(np.mean((y_pred_euros - y_test_euros)**2))
-print(f"xgboost rmse on training set : {rmse_xgb_train}")
+    y_pred_euros = np.exp(y_pred_log) -1
+    y_test_euros = np.exp(y_test) - 1
+    mae_xgb = mean_absolute_error(y_pred_euros, y_test_euros)
+    print(f"XGBoost MAE on training set: {mae_xgb}")
+    rmse_xgb_train = np.sqrt(np.mean((y_pred_euros - y_test_euros)**2))
+    print(f"xgboost rmse on training set : {rmse_xgb_train}")
 
+
+if __name__ == "__main__":
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=100, timeout=600)
+
+    print("Number of finished trials: ", len(study.trials))
+    print("Best trial:")
+    trial = study.best_trial
+
+    print("  Value: {}".format(trial.value))
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print("    {}: {}".format(key, value))
+        
 # imortance des variables 
 feature_importance = xgb_reg.feature_importances_
 sorted_idx = np.argsort(feature_importance)[::-1]
