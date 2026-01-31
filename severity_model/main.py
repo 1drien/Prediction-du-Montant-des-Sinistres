@@ -2,13 +2,14 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 import matplotlib
 matplotlib.use('Agg')   # Backend for non-GUI environments (saves files instead of showing them)
 import matplotlib.pyplot as plt
 import xgboost as xgb
 from xgboost import XGBRegressor
 import optuna
+from sklearn.model_selection import KFold, cross_val_score
 
 
 df = pd.read_csv('train.csv')
@@ -109,60 +110,96 @@ print(f"error after log transformation: {erreur_log}")
 rmse_log = np.sqrt(np.mean((y_test_original - true_prediction)**2))
 print(f"RMSE after log transformation :  {rmse_log}")
 
-# nous allons maintenant faire un xgboost pour voir si cela améliore les performances du modèle
-X = df_log.drop(columns=["montant_sinistre"])
-y = df_log["montant_sinistre"]
+X = df_log.drop(columns=["montant_sinistre", "index"], errors='ignore').values
+y = df_log["montant_sinistre"].values 
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# On garde les noms de colonnes à part pour le graphique plus tard
+feature_names = df_log.drop(columns=["montant_sinistre", "index"], errors='ignore').columns
 
-#optimisation of hyperparameters with optuna
+# 2. Paramètres (Anti-Surapprentissage)
 final_params = {
     'objective': 'reg:squarederror',
+    'booster': 'gbtree',
     'verbosity': 0,
-    'booster': 'gblinear',
-    'lambda': 1.049e-05,
-    'alpha': 0.000823,
-    'subsample': 0.897,
-    'colsample_bytree': 0.204
+    'learning_rate': 0.05,   
+    'n_estimators': 300,     
+    'max_depth': 3,          
+    'min_child_weight': 5,   
+    'subsample': 0.7,        
+    'colsample_bytree': 0.7, 
+    'reg_alpha': 0.1,        
+    'reg_lambda': 1.0        
 }
 
-# 2. On crée et entraîne le modèle unique avec ces paramètres
-final_model = XGBRegressor(**final_params)
-final_model.fit(X_train, y_train)
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+mae_scores = []
+rmse_scores = []
 
-# 3. Prédictions finales sur le Test Set
-y_pred_log = final_model.predict(X_test)
+print("Lancement du K-Fold...")
 
-# 4. Conversion inverse (Log -> Euros)
-y_pred_euros = np.exp(y_pred_log) - 1
-y_test_euros = np.exp(y_test) - 1
+for train_index, val_index in kf.split(X):
+    
+    # - Pas de .iloc pour des numpy arrays juste des crochets [ ] 
+    X_fold_train, X_fold_val = X[train_index], X[val_index]
+    y_fold_train, y_fold_val = y[train_index], y[val_index]
+    
+    # Création et entraînement
+    model_kfold = xgb.XGBRegressor(**final_params)
+    model_kfold.fit(X_fold_train, y_fold_train)
+    
+    # Prédiction
+    y_pred_log = model_kfold.predict(X_fold_val)
 
-# 5. Calcul des scores finaux
-mae_final = mean_absolute_error(y_test_euros, y_pred_euros)
-rmse_final = np.sqrt(np.mean((y_test_euros - y_pred_euros)**2))
+    # Conversion inverse (Log -> Euros)
+    y_pred_euros = np.exp(y_pred_log) - 1
+    y_test_euros = np.exp(y_fold_val) - 1
 
-print("------------------------------------------------")
-print(f" MAE Finale : {mae_final:.2f} €")
-print(f" RMSE Final : {rmse_final:.2f} €")
-print("------------------------------------------------")
+    # Scores
+    mae_scores.append(mean_absolute_error(y_test_euros, y_pred_euros))
+    rmse_scores.append(np.sqrt(np.mean((y_test_euros - y_pred_euros)**2)))
 
-# --- IMPORTANCE DES FEATURES ---
-# Note : Avec 'gblinear', l'importance correspond aux 'poids' (coefficients) de la régression.
 
-# On récupère les poids
-weights = pd.Series(final_model.coef_, index=X_train.columns)
+avg_mae_test = np.mean(mae_scores)
+avg_rmse_test = np.mean(rmse_scores)
 
-# On prend les 10 plus impactants (en valeur absolue, car un poids négatif est aussi important)
-top_features = weights.abs().sort_values(ascending=False).head(10)
+print(f"\n--- RÉSULTATS K-FOLD (Estimation Performance Réelle) ---")
+print(f"MAE moyenne  : {avg_mae_test:.2f} €")
+print(f"RMSE moyen   : {avg_rmse_test:.2f} €")
+
+# 3. Entraînement Final sur TOUT le dataset
+full_model = xgb.XGBRegressor(**final_params)
+full_model.fit(X, y) 
+print("\nModèle final entraîné sur 100% des données.")
+
+# 4. Graphique
+full_model.get_booster().feature_names = list(feature_names)
 
 plt.figure(figsize=(10, 6))
-top_features.plot(kind='barh', color='purple')
-plt.title("Top 10 des variables les plus importantes (Modèle gblinear)")
-plt.xlabel("Poids (Impact sur le prix)")
-plt.gca().invert_yaxis() # Pour avoir le plus gros en haut
-plt.savefig("feature_importance_final.png")
-print("Graphique sauvegardé sous 'feature_importance_final.png'")
+xgb.plot_importance(full_model, max_num_features=15, height=0.5, importance_type='weight', title='Importance des variables (Sans Index)')
+plt.savefig("feature_importance_xgboost.png")
+print("Graphique sauvegardé.")
 plt.show()
+
+# 5. Verdict Surapprentissage
+y_pred_train_log = full_model.predict(X) 
+y_pred_train_euros = np.exp(y_pred_train_log) - 1
+y_true_all_euros = np.exp(y) - 1
+
+rmse_train = np.sqrt(mean_squared_error(y_true_all_euros, y_pred_train_euros))
+
+print("\n--- VERDICT SURAPPRENTISSAGE ---")
+print(f"Erreur sur le Train (Mémoire) : {rmse_train:.2f} €")
+print(f"Erreur sur le Test (Est. KFold) : {avg_rmse_test:.2f} €")
+
+ecart = avg_rmse_test - rmse_train
+print(f"Écart : {ecart:.2f} €")
+
+if ecart > 300: 
+    print(" Risque de surapprentissage.")
+elif ecart < 0:
+    print(" Situation rare (Sous-apprentissage ou chance).")
+else:
+    print(" Le modèle généralise bien (Écart raisonnable).")
 
 
 #ici le code utilisé avec optuna pour optimiser les hyperparamètres de xgboost
@@ -225,26 +262,3 @@ plt.show()
 #     for key, value in trial.params.items():
 #         print("    {}: {}".format(key, value))
 
-# --- VERDICT SURAPPRENTISSAGE ---
-
-# 1. Prédiction sur le jeu d'ENTRAÎNEMENT (ce qu'il connait déjà)
-y_pred_train_log = final_model.predict(X_train)
-y_pred_train_euros = np.exp(y_pred_train_log) - 1
-y_train_euros = np.exp(y_train) - 1
-
-# 2. Calcul du RMSE Train
-rmse_train = np.sqrt(np.mean((y_train_euros - y_pred_train_euros)**2))
-
-print("\n--- VERDICT SURAPPRENTISSAGE ---")
-print(f"Erreur sur le Train (Mémoire) : {rmse_train:.2f} €")
-print(f"Erreur sur le Test (Réalité)  : {rmse_final:.2f} €")
-
-ecart = rmse_final - rmse_train
-print(f"Écart : {ecart:.2f} €")
-
-if ecart > 200: # Seuil arbitraire, dépend du métier
-    print("Risque de surapprentissage")
-elif ecart < 0:
-    print("Le modèle est meilleur sur l'inconnu")
-else:
-    print("Le modèle généralise bien ")
