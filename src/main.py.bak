@@ -187,7 +187,7 @@ y_true_all_euros = np.exp(y) - 1
 
 rmse_train = np.sqrt(mean_squared_error(y_true_all_euros, y_pred_train_euros))
 
-print("\n--- VERDICT SURAPPRENTISSAGE ---")
+print("\n--- test surapprentissage  ---")
 print(f"Erreur sur le Train (Mémoire) : {rmse_train:.2f} €")
 print(f"Erreur sur le Test (Est. KFold) : {avg_rmse_test:.2f} €")
 
