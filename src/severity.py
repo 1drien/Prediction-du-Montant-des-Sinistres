@@ -23,7 +23,7 @@ def run_kfold_validation(X, y, n_splits=5):
     Lance la validation croisée (K-Fold).
     Retourne : MAE moyen, RMSE moyen (sur le Test).
     """
-    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    kf = KFold(n_splits=5, shuffle=True, random_state=None)    
     mae_scores = []
     rmse_scores = []
 
