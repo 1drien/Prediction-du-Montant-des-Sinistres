@@ -57,8 +57,7 @@ def prepare_for_severity(df):
     print("--- Préparation pour le modèle de Sévérité ---")
     
     # 1. FILTRE : On supprime ceux qui n'ont pas eu d'accident
-    # Ton code original : df = df.drop(df[df['nombre_sinistres'] == 0].index)
-    # Ma version (plus rapide) : on garde ceux > 0
+    # df = df.drop(df[df['nombre_sinistres'] == 0].index)
     df_sev = df[df['nombre_sinistres'] > 0].copy()
     
     # 2. CIBLE (y) : Log transformation
@@ -86,6 +85,23 @@ def prepare_for_severity(df):
 
 def prepare_for_frequency(df):
     """
-    ÉTAPE 2 BIS (SPÉCIFIQUE FRÉQUENCE) - Pour plus tard.
+    ÉTAPE 2 BIS (SPÉCIFIQUE FRÉQUENCE) 
+    -² On transforme la cible en binaire (0 = pas de sinistre, 1 = au moins 1 sinistre).
+    - On retire les colonnes inutiles (ID, Index...).
+    
     """
-    pass
+    print("--- Préparation pour le modèle de Fréquence ---")
+    # 1. CIBLE (y) : Binaire
+    
+    df['nombre_sinistres'] = df['nombre_sinistres'].apply(lambda x: 1 if x > 0 else 0)
+    df_freq = df[df['nombre_sinistres'] > 0].copy()
+    
+    cols_to_drop = [
+        'montant_sinistre', 'nombre_sinistres', 
+        'id_contrat', 'id_client', 'id_vehicule', 'code_postal', 'index'
+    ]
+    
+    X_freq = df_freq.drop(columns=cols_to_drop, errors='ignore')
+    y_freq = df_freq['nombre_sinistres'].values
+    
+    return X_freq, y_freq
