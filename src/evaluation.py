@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import roc_curve, roc_auc_score
 
 import xgboost as xgb
 import numpy as np
@@ -50,3 +52,36 @@ def check_overfitting(model, X, y, test_rmse_avg):
         print("Situation rare (Sous-apprentissage ou chance).")
     else:
         print("Le modèle généralise bien (Robuste).")
+
+def plot_frequency_metrics(y_true, y_prob, save_path):
+    """
+    Affiche la courbe de Calibration et la courbe ROC.
+    
+    """
+    plt.figure(figsize=(12, 5))
+    
+    # 1. Calibration Curve (Fiabilité)
+    plt.subplot(1, 2, 1)
+    prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=10)
+    plt.plot(prob_pred, prob_true, marker='o', label='Modèle', color='blue')
+    plt.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Idéal')
+    plt.xlabel('Probabilité Prédite')
+    plt.ylabel('Fréquence Réelle')
+    plt.title('Qualité de la Calibration')
+    plt.legend()
+    plt.grid(True)
+    
+    # 2. ROC Curve (Puissance de classement)
+    plt.subplot(1, 2, 2)
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    auc_score = roc_auc_score(y_true, y_prob)
+    plt.plot(fpr, tpr, color='orange', lw=2, label=f'AUC = {auc_score:.3f}')
+    plt.plot([0, 1], [0, 1], color='navy', linestyle='--')
+    plt.xlabel('Faux Positifs')
+    plt.ylabel('Vrais Positifs')
+    plt.title('Courbe ROC')
+    plt.legend(loc="lower right")
+    
+    plt.tight_layout()
+    plt.savefig(save_path)
+    print(f"Graphiques Fréquence sauvegardés sous : {save_path}")
